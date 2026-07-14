@@ -12,6 +12,7 @@ Classes:
 """
 
 
+import torch
 from torch import nn
 from torchvision import models
 
@@ -76,7 +77,7 @@ class LRCN(nn.Module):
         # Final fully-connected layer to produce logits for each class.
         self.fc = nn.Linear(hidden_size, n_classes)
 
-    def forward(self, x):
+    def forward(self, x, lengths):
         """
         Forward pass for the LRCN model.
         
@@ -116,8 +117,11 @@ class LRCN(nn.Module):
         # Process the complete feature sequence in LSTM
         rnn_output, _ = self.rnn(features)
 
-        # Use the rnn output (B, T, hidden_size) from the final timestep
-        final_features = rnn_output[:, -1, :]
+        # Use the rnn output (B, T, hidden_size) from the final valid timestep
+        last_valid_indices = lengths-1
+        batch_indices = torch.arange(batch_size, device=rnn_output.device)
+
+        final_features = rnn_output[batch_indices, last_valid_indices, :]
 
         final_features = self.dropout(final_features)
         logits = self.fc(final_features)

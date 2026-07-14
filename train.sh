@@ -1,17 +1,20 @@
 #!/bin/bash
-FRAME_DIR="${FRAME_DIR:-HMDB51}"
+FRAME_DIR="${FRAME_DIR:-/content/datasets/HMDB51}"
+CNN_BACKBONE="${CNN_BACKBONE:-resnet50}"
 N_EPOCHS="${N_EPOCHS:-50}"
+WANDB_PROJECT="${WANDB_PROJECT:-assignment-4-training}"
+RUN_NAME="${RUN_NAME:-lrcn-resnet50-uniform-sampling-valid-lengths}"
 
 python run.py \
     --frame_dir "$FRAME_DIR" \
     --train_size 0.75 \
     --test_size 0.15 \
-    --fr_per_vid 16 \
     --n_classes 51 \
-    --model_type lrcn \
-    --cnn_backbone resnet50 \
-    --wandb_project assignment-4-training \
-    --run_name lrcn-resnet50-baseline \
+    --fr_per_vid 16 \
     --batch_size 4 \
+    --model_type lrcn \
+    --cnn_backbone "$CNN_BACKBONE" \
+    --wandb_project "$WANDB_PROJECT" \
+    --run_name "$RUN_NAME" \
     --n_epochs "$N_EPOCHS" \
     --mode train

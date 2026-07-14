@@ -184,12 +184,12 @@ def get_epoch_loss(model, criterion, dataloader, device, optimizer=None):  # pyl
     running_loss, running_total_correct_preds = 0.0, 0.0
     processed_samples = 0
 
-    for x_batch, y_batch in tqdm(dataloader):
+    for x_batch, y_batch, lengths in tqdm(dataloader):
         # The collate function returns (None, None) if every sample in the batch contains no frames
-        if x_batch is None or y_batch is None:
+        if x_batch is None or y_batch is None or lengths is None:
             continue
-        x_batch, y_batch = x_batch.to(device), y_batch.to(device)
-        output = model(x_batch)
+        x_batch, y_batch, lengths = x_batch.to(device), y_batch.to(device), lengths.to(device)
+        output = model(x_batch, lengths)
         # batch_loss is a mean because CrossEntropyLoss uses its default reduction='mean'
         batch_loss, n_batch_correct_preds = get_batch_loss(criterion, output, y_batch, optimizer)
 

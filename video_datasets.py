@@ -62,7 +62,16 @@ class VideoDataset(Dataset):
         video_dir, label = self.dataset[idx]
         frame_paths = sorted(
             glob.glob(os.path.join(video_dir, "*.jpg"))
-        )[:self.fpv]
+        )
+
+        # Uniformly sample frames from a video file if too many frames have been captured
+        if len(frame_paths) > self.fpv:
+            frame_indices = np.linspace(
+                0, len(frame_paths)-1, num=self.fpv, dtype=np.int64
+            )
+            frame_paths = [
+                frame_paths[index] for index in frame_indices
+            ]
 
         # Open frames as RGB using PIL
         frames = [
@@ -216,8 +225,14 @@ def collate_fn_rnn(batch):
     # Filter out any samples that have no frames
     valid_samples = [(imgs, label) for imgs, label in zip(imgs_batch, label_batch) if len(imgs) > 0]
     if not valid_samples:
-        return None, None
+        return None, None, None
     imgs_batch, label_batch = zip(*valid_samples)
+
+    # Record lengths before padding
+    lengths = torch.tensor(
+        [len(images) for images in imgs_batch],
+        dtype=torch.long,
+    )
 
     # Pad the video frame tensors along the time dimension (T)
     # Resulting shape: (batch_size, max_T, C, H, W)
@@ -226,4 +241,4 @@ def collate_fn_rnn(batch):
     # Convert labels to a tensor
     labels_tensor = torch.tensor(label_batch)
 
-    return padded_imgs, labels_tensor
+    return padded_imgs, labels_tensor, lengths
