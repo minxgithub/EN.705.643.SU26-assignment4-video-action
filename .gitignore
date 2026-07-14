@@ -1,0 +1,28 @@
+# Trained models and checkpoints
+models/
+*.pt
+*.pth
+*.ckpt
+
+# Dataset and saved splits
+HMDB51/
+data/
+datasets/
+splits.npy
+
+# Weights & Biases local files
+wandb/
+
+# Python-generated files
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.pylint.d/
+
+# Environment and secrets
+.env
+.venv/
+venv/
+
+# macOS
+.DS_Store
