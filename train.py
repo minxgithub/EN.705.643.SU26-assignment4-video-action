@@ -87,7 +87,7 @@ def train(dataloaders, model, criterion, optimizer, scheduler,  # pylint: disabl
         scheduler.step(val_loss)
 
         print(f"train loss: {train_loss:.6f}, val loss: {val_loss:.6f}, \
-              accuracy: {100*val_accuracy:.2f}")
+              train accuracy: {100*train_accuracy:.2f}, val accuracy: {100*val_accuracy:.2f}")
         print("-" * 60)
         print()
 
