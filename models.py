@@ -94,25 +94,25 @@ class LRCN(nn.Module):
             Tensor: Output logits for each sample in the batch with shape (batch_size, n_classes).
         """
         # x: (B, T, C, H, W)
-        batch_size, time_steps, channels, height, width = x.shape
+        batch_size, time_steps, _, _, _ = x.shape
 
-        # Combine batch and time so the CNN processes all the frames together
-        x = x.reshape(
-            batch_size * time_steps,
-            channels,
-            height,
-            width,
+        # True for real frames and False for padded timesteps.
+        valid_mask = (
+            torch.arange(time_steps, device=x.device)[None, :]
+            < lengths[:, None]
         )
 
-        # CNN output: (B*T, feature_dim)
-        features = self.base_model(x)
+        # Shape: (total_valid_frames, C, H, W)
+        valid_frames = x[valid_mask]
+        valid_features = self.base_model(valid_frames)
 
-        # Restore the temporal structure for LSTM: (B, T, feature_dim)
-        features = features.reshape(
+        # Restore shape: (B, T, feature_dim)
+        features = valid_features.new_zeros(
             batch_size,
             time_steps,
-            -1,
+            valid_features.size(-1),
         )
+        features[valid_mask] = valid_features
 
         # Process the complete feature sequence in LSTM
         rnn_output, _ = self.rnn(features)
