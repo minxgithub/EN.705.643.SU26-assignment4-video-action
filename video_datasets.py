@@ -11,6 +11,7 @@ sequences.
 
 import os
 import glob
+import re
 
 import torch
 from torch.utils.data import Dataset
@@ -21,7 +22,7 @@ from PIL import Image
 
 from tqdm import tqdm
 import numpy as np
-from sklearn.model_selection import StratifiedShuffleSplit
+from sklearn.model_selection import GroupShuffleSplit
 
 
 class VideoDataset(Dataset):
@@ -110,58 +111,184 @@ def load_dataset(frame_dir):
             - vid_dataset (dict): Dictionary mapping video directory paths to integer labels.
             - label_dict (dict): Dictionary mapping video category names to integer labels.
     """
-    label_dict = {vid_cat: idx for idx, vid_cat in enumerate(sorted(os.listdir(frame_dir)))}
+    category_names = sorted(
+        category
+        for category in os.listdir(frame_dir)
+        if os.path.isdir(os.path.join(frame_dir, category))
+    )
+
+    label_dict = {
+        category: index
+        for index, category in enumerate(category_names)
+    }
+
     vid_dataset = {}
-    print('Loading video dataset....')
-    for vid_cat in tqdm(sorted(os.listdir(frame_dir))):
-        vid_cat_path = os.path.join(frame_dir, vid_cat)
-        for vid in os.listdir(vid_cat_path):
-            vid_path = os.path.join(vid_cat_path, vid)
-            vid_dataset[vid_path] = label_dict[vid_cat]
+    print("Loading video dataset....")
+
+    for category in tqdm(category_names):
+        category_path = os.path.join(frame_dir, category)
+
+        for video_name in sorted(os.listdir(category_path)):
+            video_path = os.path.join(
+                category_path,
+                video_name,
+            )
+
+            if os.path.isdir(video_path):
+                vid_dataset[video_path] = label_dict[category]
+
     return vid_dataset, label_dict
 
 
-def dataset_split(vid_dataset, tr_ratio, ts_ratio, seed=0):  # pylint: disable=too-many-locals
+def get_source_group(video_path):
     """
-    Split the dataset into training, validation, and test sets using stratified sampling.
-    
-    This function uses StratifiedShuffleSplit to ensure that each split has a representative
-    distribution of classes.
-    
+    Extract the original source-video identifier from an HMDB51 clip path.
+
+    HMDB51 clip directory names follow a structure resembling:
+
+        source_title_action_f_cm_np1_ba_med_0
+
+    Multiple numbered clips may therefore originate from the same source video.
+    These clips must remain in the same dataset split.
+
     Args:
-        vid_dataset (dict): Dictionary mapping video paths to labels.
-        tr_ratio (float): Proportion of the data to use for training.
-        ts_ratio (float): Proportion of the data to use for testing.
-        seed (int, optional): Random seed for reproducibility. Default is 0.
-    
+        video_path (str): Path to one extracted video-clip directory.
+
     Returns:
-        tuple: (tr_dataset, val_dataset, ts_dataset)
-            - tr_dataset (list): List of (video_path, label) tuples for the training set.
-            - val_dataset (list): List of (video_path, label) tuples for the validation set.
-            - ts_dataset (list): List of (video_path, label) tuples for the test set.
+        str: Original source-video identifier.
+
+    Raises:
+        ValueError: If the expected HMDB51 naming pattern is not found.
     """
-    vid_paths = np.array(list(vid_dataset.keys()))
-    vid_labels = np.array(list(vid_dataset.values()))
-    print('Splitting train/validation/test datasets....')
+    video_path = os.path.normpath(video_path)
+    class_name = os.path.basename(os.path.dirname(video_path))
+    video_name = os.path.basename(video_path)
 
-    # Test split using StratifiedShuffleSplit
-    ts_spliter = StratifiedShuffleSplit(n_splits=1, test_size=ts_ratio, random_state=seed)
-    for tr_val_idx, ts_idx in ts_spliter.split(vid_paths, vid_labels):
-        ts_paths, ts_labels = vid_paths[ts_idx], vid_labels[ts_idx]
-        tr_val_paths, tr_val_labels = vid_paths[tr_val_idx], vid_labels[tr_val_idx]
-    ts_dataset = list(zip(ts_paths, ts_labels))
+    pattern = re.compile(
+        rf"_{re.escape(class_name)}_[^_]+_[cn]m_np\d+_"
+    )
+    match = pattern.search(video_name)
 
-    # Train/validation split
-    val_ratio = 1 - tr_ratio - ts_ratio
-    val_wt = val_ratio / (tr_ratio + val_ratio)
-    val_spliter = StratifiedShuffleSplit(n_splits=1, test_size=val_wt, random_state=seed)
-    for tr_idx, val_idx in val_spliter.split(tr_val_paths, tr_val_labels):
-        tr_paths, tr_labels = tr_val_paths[tr_idx], tr_val_labels[tr_idx]
-        val_paths, val_labels = tr_val_paths[val_idx], tr_val_labels[val_idx]
-    tr_dataset = list(zip(tr_paths, tr_labels))
-    val_dataset = list(zip(val_paths, val_labels))
+    if match is None:
+        raise ValueError(
+            "Could not extract the source-video group from "
+            f"clip directory: {video_path}"
+        )
 
-    return tr_dataset, val_dataset, ts_dataset
+    return video_name[:match.start()]
+
+
+def dataset_split(vid_dataset, tr_ratio, ts_ratio, seed=0, max_attempts=1000):  # pylint: disable=too-many-locals
+    """
+    Split clips by original source video.
+
+    Every clip derived from the same source video is assigned entirely to
+    training, validation, or testing. This prevents source-level leakage.
+
+    GroupShuffleSplit preserves groups rather than individual clips, so the
+    final sample proportions are approximate.
+
+    Args:
+        vid_dataset (dict): Mapping from clip-directory paths to labels.
+        tr_ratio (float): Requested training proportion.
+        ts_ratio (float): Requested testing proportion.
+        seed (int): Initial random seed.
+        max_attempts (int): Maximum attempts to find splits containing all
+                            classes.
+
+    Returns:
+        tuple: Training, validation, and testing sample lists.
+
+    Raises:
+        ValueError: If ratios are invalid or a complete split cannot be found.
+    """
+    val_ratio = 1.0 - tr_ratio - ts_ratio
+
+    if tr_ratio <= 0 or ts_ratio <= 0 or val_ratio <= 0:
+        raise ValueError(
+            "Training, validation, and testing ratios must all be positive."
+        )
+
+    vid_paths = np.array(sorted(vid_dataset.keys()))
+    vid_labels = np.array([vid_dataset[path] for path in vid_paths])
+    vid_groups = np.array([get_source_group(path) for path in vid_paths])
+
+    all_classes = set(np.unique(vid_labels))
+    val_weight = val_ratio / (tr_ratio + val_ratio)
+
+    print("Splitting train/validation/test datasets by source video....")
+
+    for attempt in range(max_attempts):
+        current_seed = seed + attempt
+
+        test_splitter = GroupShuffleSplit(
+            n_splits=1,
+            test_size=ts_ratio,
+            random_state=current_seed,
+        )
+
+        train_val_idx, test_idx = next(
+            test_splitter.split(
+                vid_paths,
+                vid_labels,
+                groups=vid_groups,
+            )
+        )
+
+        val_splitter = GroupShuffleSplit(
+            n_splits=1,
+            test_size=val_weight,
+            random_state=current_seed + max_attempts,
+        )
+
+        train_relative_idx, val_relative_idx = next(
+            val_splitter.split(
+                vid_paths[train_val_idx],
+                vid_labels[train_val_idx],
+                groups=vid_groups[train_val_idx],
+            )
+        )
+
+        train_idx = train_val_idx[train_relative_idx]
+        val_idx = train_val_idx[val_relative_idx]
+
+        split_indices = (train_idx, val_idx, test_idx)
+
+        if all(
+            set(np.unique(vid_labels[indices])) == all_classes
+            for indices in split_indices
+        ):
+            break
+    else:
+        raise RuntimeError(
+            "Unable to create grouped splits containing every class."
+        )
+
+    train_groups = set(vid_groups[train_idx])
+    val_groups = set(vid_groups[val_idx])
+    test_groups = set(vid_groups[test_idx])
+
+    assert train_groups.isdisjoint(val_groups)
+    assert train_groups.isdisjoint(test_groups)
+    assert val_groups.isdisjoint(test_groups)
+
+    train_dataset = list(zip(vid_paths[train_idx], vid_labels[train_idx]))
+    val_dataset = list(zip(vid_paths[val_idx], vid_labels[val_idx]))
+    test_dataset = list(zip(vid_paths[test_idx], vid_labels[test_idx]))
+
+    total_samples = len(vid_paths)
+
+    print(
+        "Grouped split sizes: "
+        f"train={len(train_dataset)} "
+        f"({len(train_dataset) / total_samples:.2%}), "
+        f"val={len(val_dataset)} "
+        f"({len(val_dataset) / total_samples:.2%}), "
+        f"test={len(test_dataset)} "
+        f"({len(test_dataset) / total_samples:.2%})"
+    )
+
+    return train_dataset, val_dataset, test_dataset
 
 
 def collate_fn_r3d_18(batch):
