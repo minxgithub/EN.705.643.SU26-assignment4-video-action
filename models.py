@@ -68,6 +68,11 @@ class LRCN(nn.Module):
         base_cnn.fc = nn.Identity()
         self.base_model = base_cnn
 
+        # Freeze the pretrained CNN backbone
+        if pretrained:
+            for parameter in self.base_model.parameters():
+                parameter.requires_grad = False
+
         # Define the LSTM to process the sequence of frame features.
         self.rnn = nn.LSTM(num_features, hidden_size, n_layers, batch_first=True)
 

@@ -60,6 +60,10 @@ def train(dataloaders, model, criterion, optimizer, scheduler,  # pylint: disabl
 
         # Training phase
         model.train()
+        # Keep the frozen pretrained backbone, including BatchNorm,
+        # in evaluation mode while training the LSTM and classifier.
+        model.base_model.eval()
+
         train_loss, train_accuracy = get_epoch_loss(
             model, criterion, dataloaders['train'], device, optimizer
         )
