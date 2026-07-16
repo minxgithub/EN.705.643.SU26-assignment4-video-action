@@ -60,9 +60,16 @@ def train(dataloaders, model, criterion, optimizer, scheduler,  # pylint: disabl
 
         # Training phase
         model.train()
-        # Keep the frozen pretrained backbone, including BatchNorm,
-        # in evaluation mode while training the LSTM and classifier.
-        model.base_model.eval()
+
+        # Keep a frozen LRCN backbone in evaluation mode.
+        if (
+            hasattr(model, "base_model")
+            and not any(
+                parameter.requires_grad
+                for parameter in model.base_model.parameters()
+            )
+        ):
+            model.base_model.eval()
 
         train_loss, train_accuracy = get_epoch_loss(
             model, criterion, dataloaders['train'], device, optimizer
@@ -188,12 +195,24 @@ def get_epoch_loss(model, criterion, dataloader, device, optimizer=None):  # pyl
     running_loss, running_total_correct_preds = 0.0, 0.0
     processed_samples = 0
 
-    for x_batch, y_batch, lengths in tqdm(dataloader):
-        # The collate function returns (None, None) if every sample in the batch contains no frames
-        if x_batch is None or y_batch is None or lengths is None:
+    for batch in tqdm(dataloader):
+        if len(batch) == 3:
+            x_batch, y_batch, lengths = batch
+        else:
+            x_batch, y_batch = batch
+            lengths = None
+
+        if x_batch is None or y_batch is None:
             continue
-        x_batch, y_batch, lengths = x_batch.to(device), y_batch.to(device), lengths.to(device)
-        output = model(x_batch, lengths)
+
+        x_batch, y_batch = x_batch.to(device), y_batch.to(device)
+
+        if lengths is not None:
+            lengths = lengths.to(device)
+            output = model(x_batch, lengths)
+        else:
+            output = model(x_batch)
+
         # batch_loss is a mean because CrossEntropyLoss uses its default reduction='mean'
         batch_loss, n_batch_correct_preds = get_batch_loss(criterion, output, y_batch, optimizer)
 

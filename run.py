@@ -29,6 +29,7 @@ import argparse
 import torch
 from torch import nn, optim
 from torch.optim.lr_scheduler import ReduceLROnPlateau
+from torchvision.models.video import r3d_18, R3D_18_Weights
 
 import numpy as np
 
@@ -167,9 +168,32 @@ def main(args):  # pylint: disable=too-many-locals, redefined-outer-name, too-ma
     h, w, mean, std = transform_stats(model_type)
     tr_transforms, val_ts_transforms = compose_data_transforms(h, w, mean, std)
 
-    # Initialize the model (LRCN)
-    model = LRCN(hidden_size=rnn_hidden_size, n_layers=rnn_n_layers, dropout_rate=dropout,
-                 n_classes=n_classes, pretrained=pretrained, cnn_model=cnn_backbone)
+    # Initialize the model
+    if model_type == "lrcn":
+        model = LRCN(
+            hidden_size=rnn_hidden_size,
+            n_layers=rnn_n_layers,
+            dropout_rate=dropout,
+            n_classes=n_classes,
+            pretrained=pretrained,
+            cnn_model=cnn_backbone,
+        )
+    elif model_type == "3dcnn":
+        weights = (
+            R3D_18_Weights.DEFAULT
+            if pretrained
+            else None
+        )
+        model = r3d_18(weights=weights)
+        model.fc = nn.Linear(
+            model.fc.in_features,
+            n_classes,
+        )
+    else:
+        raise ValueError(
+            f"Unsupported model type: {model_type!r}. "
+            "Expected 'lrcn' or '3dcnn'."
+        )
 
     if mode == 'train':
         # Load dataset and split into train/validation/test

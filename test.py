@@ -42,12 +42,23 @@ def test(model, dataloader, criterion, device):  # pylint: disable=too-many-loca
     targets, outputs = [], []
 
     with torch.no_grad():
-        for x_batch, y_batch, lengths in tqdm(dataloader):
-            if x_batch is None or y_batch is None or lengths is None:
-                continue
+        for batch in tqdm(dataloader):
+            if len(batch) == 3:
+                x_batch, y_batch, lengths = batch
+            else:
+                x_batch, y_batch = batch
+                lengths = None
 
-            x_batch, y_batch, lengths = x_batch.to(device), y_batch.to(device), lengths.to(device)
-            output = model(x_batch, lengths)
+            if x_batch is None or y_batch is None:
+                continue
+            x_batch, y_batch = x_batch.to(device), y_batch.to(device)
+
+            if lengths is not None:
+                lengths = lengths.to(device)
+                output = model(x_batch, lengths)
+            else:
+                output = model(x_batch)
+
             loss = criterion(output, y_batch)
             pred = output.argmax(dim=1, keepdim=True)
             batch_size = y_batch.size(0)
