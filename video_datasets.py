@@ -38,10 +38,11 @@ class VideoDataset(Dataset):
         fr_per_vid (int): Number of frames per video to load (images are taken in order).
         transforms (callable, optional): clip-level transform (e.g., resizing, normalization).
     """
-    def __init__(self, vid_dataset, fr_per_vid, transforms=None):  # pylint: disable=redefined-outer-name
+    def __init__(self, vid_dataset, fr_per_vid, transforms=None, random_temporal_crop=False):  # pylint: disable=redefined-outer-name
         self.dataset = vid_dataset
         self.fpv = fr_per_vid
         self.transforms = transforms
+        self.random_temporal_crop = random_temporal_crop
 
     def __len__(self):
         """Return the number of video samples in the dataset."""
@@ -67,12 +68,19 @@ class VideoDataset(Dataset):
 
         # Uniformly sample frames from a video file if too many frames have been captured
         if len(frame_paths) > self.fpv:
-            frame_indices = np.linspace(
-                0, len(frame_paths)-1, num=self.fpv, dtype=np.int64
-            )
-            frame_paths = [
-                frame_paths[index] for index in frame_indices
-            ]
+            if self.random_temporal_crop:
+                max_start = len(frame_paths) - self.fpv
+                start = torch.randint(0, max_start+1, size=(1,)).item()
+                frame_paths = frame_paths[
+                    start:start+self.fpv
+                ]
+            else:
+                frame_indices = np.linspace(
+                    0, len(frame_paths)-1, num=self.fpv, dtype=np.int64
+                )
+                frame_paths = [
+                    frame_paths[index] for index in frame_indices
+                ]
 
         # Open frames as RGB using PIL
         frames = [

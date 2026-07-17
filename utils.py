@@ -157,9 +157,13 @@ def compose_data_transforms(height, width, mean, std):
             - val_test_transforms: Composed transforms for the validation/test set.
     """
     train_transforms = v2.Compose([
-        v2.Resize((height, width), antialias=True),
+        v2.RandomResizedCrop(
+            size=(height, width),
+            scale=(0.8, 1.0),
+            ratio=(0.9, 1.1),
+            antialias=True,
+        ),
         v2.RandomHorizontalFlip(p=0.5),
-        v2.RandomAffine(degrees=0, translate=(0.1, 0.1)),
         v2.ToDtype(torch.float32, scale=True),
         v2.Normalize(mean, std),
     ])
